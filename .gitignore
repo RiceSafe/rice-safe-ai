@@ -1,0 +1,10 @@
+# created by virtualenv automatically
+.DS_Store
+.idea/
+__pycache__/
+venv/
+etc/
+bin/
+lib/
+share/
+pyvenv.cfg
