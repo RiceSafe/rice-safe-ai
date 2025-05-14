@@ -1,0 +1,13 @@
+fastapi
+torch
+numpy
+pandas
+tensorflow
+transformers
+scikit-learn
+joblib
+nltk
+pythainlp
+wordcloud
+Pillow
+matplotlib
