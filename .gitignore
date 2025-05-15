@@ -8,3 +8,8 @@ bin/
 lib/
 share/
 pyvenv.cfg
+
+# Local environment file
+.env
+.env.*
+!.env.example
