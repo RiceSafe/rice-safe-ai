@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/natthapol/Codes/RiceSafe/rice-safe-ai/mlruns/428569783332311702/d3fe90120de04de6a9e86f423ee497d7/artifacts
+end_time: 1747316001002
+entry_point_name: ''
+experiment_id: '428569783332311702'
+lifecycle_stage: active
+run_id: d3fe90120de04de6a9e86f423ee497d7
+run_name: wise-crane-421
+run_uuid: d3fe90120de04de6a9e86f423ee497d7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747315917510
+status: 3
+tags: []
+user_id: natthapol

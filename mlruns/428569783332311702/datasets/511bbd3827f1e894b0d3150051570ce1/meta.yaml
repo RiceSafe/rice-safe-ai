@@ -1,0 +1,10 @@
+digest: b7e3e294
+name: dataset
+profile: '{"features_shape": [250, 2304], "features_size": 576000, "features_nbytes":
+  2304000, "targets_shape": [250, 5], "targets_size": 1250, "targets_nbytes": 10000}'
+schema: '{"mlflow_tensorspec": {"features": "[{\"type\": \"tensor\", \"tensor-spec\":
+  {\"dtype\": \"float32\", \"shape\": [-1, 2304]}}]", "targets": "[{\"type\": \"tensor\",
+  \"tensor-spec\": {\"dtype\": \"float64\", \"shape\": [-1, 5]}}]"}}'
+source: '{"tags": {"mlflow.user": "natthapol", "mlflow.source.name": "train_ricesafe_multimodal.py",
+  "mlflow.source.type": "LOCAL", "mlflow.source.git.commit": "2a6a2eebf501ebe46ac20fe3af997cf663e1a210"}}'
+source_type: code

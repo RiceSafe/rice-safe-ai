@@ -1,0 +1,24 @@
+artifact_path: label_encoder
+flavors:
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.6.1
+is_signature_from_type_hint: false
+mlflow_version: 2.22.0
+model_size_bytes: 1699
+model_uuid: 2521fe44dc9f439cb3b1d175c2be144f
+prompts: null
+run_id: d3fe90120de04de6a9e86f423ee497d7
+saved_input_example_info:
+  artifact_path: input_example.json
+  pandas_orient: split
+  serving_input_path: serving_input_example.json
+  type: dataframe
+signature:
+  inputs: '[{"type": "string", "name": "l_in", "required": true}]'
+  outputs: '[{"type": "long", "name": "l_out", "required": true}]'
+  params: null
+type_hint_from_example: false
+utc_time_created: '2025-05-15 13:32:45.292216'
