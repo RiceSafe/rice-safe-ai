@@ -11,3 +11,5 @@ pythainlp
 wordcloud
 Pillow
 matplotlib
+seaborn
+mlflow
