@@ -8,6 +8,10 @@ bin/
 lib/
 share/
 pyvenv.cfg
+data/
+features_stratified/
+mlruns/
+data_physical/
 
 # Local environment file
 .env
