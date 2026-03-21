@@ -1,36 +1,36 @@
 import io
-import json
 import os
 import traceback
-
-import mlflow
+import joblib
 import numpy as np
 import torch
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+import tensorflow as tf
+from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image as keras_image
-from transformers import AutoModel, AutoTokenizer
+from transformers import CLIPProcessor, CLIPModel, AutoTokenizer, AutoModel
 
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env.api")
 if os.path.exists(dotenv_path):
     print(f"[*] Loading environment variables from: {dotenv_path}")
     load_dotenv(dotenv_path=dotenv_path)
-else:
-    print(
-        f"[INFO] .env.api file not found at {dotenv_path}. Using default hyperparameter values or system environment variables if set."
-    )
 
 os.environ["TOKENIZERS_PARALLELISM"] = os.environ.get("TOKENIZERS_PARALLELISM", "false")
 
+physical_devices = tf.config.list_physical_devices('GPU')
+if physical_devices:
+    try:
+        for device in physical_devices:
+            tf.config.experimental.set_memory_growth(device, True)
+        print("[INFO] TensorFlow GPU memory growth enabled.")
+    except Exception as e:
+        print(f"[WARNING] Could not set memory growth: {e}")
 
-# Initialize FastAPI application
 app = FastAPI(title="RiceSafe Disease Prediction API")
 
-# Configure CORS (Cross-Origin Resource Sharing) to allow requests from any origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,232 +39,221 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define the computation device (CPU or GPU) for PyTorch models
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+elif torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
 print(f"[INFO] API using device: {DEVICE}")
 
-# Get MLFLOW_RUN_ID from environment variables (set in .env file)
-MLFLOW_RUN_ID = os.environ.get("MLFLOW_RUN_ID")
+BASE_MODEL_PATH = os.path.join(os.path.dirname(__file__))
+KERAS_MODEL_NAME = "RiceSafeModel.keras"
+LABEL_ENCODER_NAME = "label_encoderV3.pkl"
 
-# Validate that MLFLOW_RUN_ID is provided
-if not MLFLOW_RUN_ID:
-    print("[FATAL ERROR] API cannot start: MLFLOW_RUN_ID must be set in .env file.")
-    raise RuntimeError("API Startup Error: MLFLOW_RUN_ID not configured.")
+CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+CLIP_THRESHOLD  = float(os.environ.get("CLIP_THRESHOLD", 0.3))
+CLIP_LABELS = [
+    "a photo of a rice leaf or rice plant",
+    "a photo of a person or selfie",
+    "a photo of an animal",
+    "a photo of a vehicle or building",
+    "a photo of food or a meal",
+    "a screenshot of a phone or computer screen",
+]
+CLIP_POSITIVE_INDEX = 0
 
-# Global variables to hold loaded models and preprocessors
-keras_model = None
-label_encoder = None
-scaler = None
-text_tokenizer = None  # For BAAI/bge-m3 text embeddings
-text_model_embedder = None  # For BAAI/bge-m3 text embeddings
-mobilenet_extractor = None  # For image feature extraction
+PREDICTION_MAP = {
+    "ปกติ": "normal",
+    "อื่นๆ": "other_diseases",
+    "โรคไหม้": "rice_blast",
+    "โรคใบจุดสีน้ำตาล": "brown_spot",
+    "โรคขอบใบแห้ง": "bacterial_leaf_blight",
+}
 
+DISEASE_CONFIDENCE_THRESHOLD = float(os.environ.get("DISEASE_CONFIDENCE_THRESHOLD", 0.80))
 
-# Load all necessary models and preprocessors when the API starts up
+ENSEMBLE_W_MAIN = 0.60
+ENSEMBLE_W_IMG  = 0.20
+ENSEMBLE_W_TXT  = 0.20
+
+keras_model    = None
+label_encoder  = None
+clip_model     = None
+clip_processor = None
+bge_tokenizer  = None
+bge_model      = None
+
 @app.on_event("startup")
 async def load_assets_on_startup():
-    global keras_model, label_encoder, scaler, text_tokenizer, text_model_embedder, mobilenet_extractor
+    global keras_model, label_encoder
+    global clip_model, clip_processor
+    global bge_tokenizer, bge_model
 
-    print("[INFO] API Startup: Loading models and preprocessors...")
-    if not MLFLOW_RUN_ID:
-        print("[ERROR] MLFLOW_RUN_ID not defined within startup. Models cannot load.")
-        return
-
-    try:
-        # Construct URIs for MLflow artifacts based on the Run ID
-        keras_model_uri = f"runs:/{MLFLOW_RUN_ID}/model"
-        label_encoder_uri = f"runs:/{MLFLOW_RUN_ID}/label_encoder"
-        scaler_uri = f"runs:/{MLFLOW_RUN_ID}/feature_scaler"
-
-        print(f"[*] Loading Keras model from: {keras_model_uri}")
-        keras_model = mlflow.keras.load_model(keras_model_uri)
-        print(f"[*] Keras model loaded.")
-
-        print(f"[*] Loading LabelEncoder from: {label_encoder_uri}")
-        label_encoder = mlflow.sklearn.load_model(label_encoder_uri)
-        print(f"[*] LabelEncoder loaded.")
-
-        print(f"[*] Loading StandardScaler from: {scaler_uri}")
-        scaler = mlflow.sklearn.load_model(scaler_uri)
-        print(f"[*] StandardScaler loaded.")
-
-        # Initialize pre-trained models
-        print("[*] Initializing pre-trained helper models ...")
-        text_tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
-        text_model_embedder = AutoModel.from_pretrained("BAAI/bge-m3").eval().to(DEVICE)
-        mobilenet_extractor = MobileNetV2(
-            weights="imagenet",
-            include_top=False,
-            pooling="avg",
-            input_shape=(224, 224, 3),
-        )
-        mobilenet_extractor.trainable = False
-        print("[DONE] All models, preprocessors, and extractors loaded successfully.")
-
-    except Exception as e_load:
-        print(f"[FATAL ERROR] During API startup model/preprocessor loading: {e_load}")
-        traceback.print_exc()
-        # This error will prevent the API from starting correctly.
-        raise RuntimeError(f"API Startup Failed: Asset loading error - {e_load}")
-
-
-# Preprocess incoming image and text data to create features for the model
-def preprocess_input_for_model(image_bytes: bytes, description: str):
-    # Check all necessary components are loaded before attempting to preprocess
-    if not all(
-        [
-            keras_model,
-            label_encoder,
-            scaler,
-            text_tokenizer,
-            text_model_embedder,
-            mobilenet_extractor,
-        ]
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail="Models not fully loaded or API not ready. Please try again shortly.",
-        )
+    print(f"[INFO] API Startup: Loading assets from {BASE_MODEL_PATH}...")
 
     try:
-        # Image feature extraction
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((224, 224))
-        img_array = keras_image.img_to_array(img)
-        img_array_expanded = np.expand_dims(img_array, axis=0)
-        img_array_preprocessed = preprocess_input(img_array_expanded)
-        img_feat = mobilenet_extractor.predict(img_array_preprocessed)
+        keras_path = os.path.join(BASE_MODEL_PATH, KERAS_MODEL_NAME)
+        print(f"[*] Loading Keras model: {keras_path}")
+        keras_model = load_model(keras_path)
 
-        # Text feature extraction
-        inputs_text = text_tokenizer(
-            description,
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=512,
-        ).to(DEVICE)
-        with torch.no_grad():
-            text_feat = (
-                text_model_embedder(**inputs_text)
-                .last_hidden_state.mean(dim=1)
-                .cpu()
-                .numpy()
-            )
+        le_path = os.path.join(BASE_MODEL_PATH, LABEL_ENCODER_NAME)
+        print(f"[*] Loading LabelEncoder: {le_path}")
+        label_encoder = joblib.load(le_path)
 
-        # Combine and scale features
-        combined_feat_flat = np.concatenate((img_feat.flatten(), text_feat.flatten()))
-        combined_feat_reshaped = combined_feat_flat.reshape(1, -1)
-        scaled_feat = scaler.transform(combined_feat_reshaped)
-        return scaled_feat
-    except Exception as e_process:
-        print(f"[ERROR] Preprocessing input: {e_process}")
+        print(f"[*] Loading BGE-M3 text encoder on {DEVICE}...")
+        bge_tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+        bge_model = AutoModel.from_pretrained("BAAI/bge-m3", use_safetensors=True).to(DEVICE).eval()
+
+        print(f"[*] Loading CLIP gatekeeper: {CLIP_MODEL_NAME}...")
+        clip_model = CLIPModel.from_pretrained(CLIP_MODEL_NAME).eval().to(DEVICE)
+        clip_processor = CLIPProcessor.from_pretrained(CLIP_MODEL_NAME)
+        print(f"[*] CLIP loaded (threshold: {CLIP_THRESHOLD})")
+
+        print("[DONE] All assets loaded successfully.")
+
+    except Exception as e:
+        print(f"[FATAL ERROR] Failed to load assets: {e}")
         traceback.print_exc()
-        raise HTTPException(
-            status_code=400, detail=f"Error processing input data: {e_process}"
-        )
+        raise RuntimeError(f"API Startup Failed: {e}")
 
-
-# Load remedy and treatment information from a JSON file
-remedy_treatment_dict = {}
-try:
-    current_script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Attempt to construct path robustly, then fallback for simpler environments
-    treatment_file_path = os.path.join(current_script_dir, "data", "treatment.json")
-    if not os.path.exists(treatment_file_path):
-        treatment_file_path = os.path.join("data", "treatment.json")
-
-    with open(treatment_file_path, "r", encoding="utf-8") as f:
-        remedy_treatment_dict = json.load(f)
-    print(f"[*] Treatment data loaded successfully from {treatment_file_path}")
-except Exception as e_remedy:
-    print(
-        f"[WARNING] Failed to load treatment data from {treatment_file_path}: {e_remedy}. Remedy/treatment info will be unavailable."
+def check_rice_leaf_with_clip(pil_image: Image.Image) -> dict:
+    inputs = clip_processor(
+        text=CLIP_LABELS, images=pil_image,
+        return_tensors="pt", padding=True,
     )
+    inputs = {k: v.to(DEVICE) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
+    with torch.no_grad():
+        outputs = clip_model(**inputs)
+        probs = outputs.logits_per_image.softmax(dim=1).cpu().numpy()[0]
 
-# API endpoint for making predictions
-@app.post("/predict/")
-async def predict_endpoint(image: UploadFile = File(...), description: str = Form(...)):
-    # Check if core predictive models are loaded
-    if not all([keras_model, label_encoder, scaler]):
-        raise HTTPException(
-            status_code=503,
-            detail="Core models not loaded or API not ready. Please check server logs.",
-        )
+    rice_leaf_prob = float(probs[CLIP_POSITIVE_INDEX])
+    best_idx = int(np.argmax(probs))
+    all_scores = {label: f"{prob * 100:.1f}%" for label, prob in zip(CLIP_LABELS, probs)}
+    is_rice = (best_idx == CLIP_POSITIVE_INDEX) and (rice_leaf_prob >= CLIP_THRESHOLD)
+
+    return {
+        "is_rice_leaf": is_rice,
+        "confidence": rice_leaf_prob,
+        "matched_label": CLIP_LABELS[best_idx],
+        "all_scores": all_scores,
+    }
+
+def preprocess_input_for_model(pil_image: Image.Image, description: str):
+    if not all([keras_model, bge_tokenizer, bge_model]):
+        raise HTTPException(status_code=503, detail="Models not fully loaded.")
 
     try:
-        image_bytes = await image.read()
-        features = preprocess_input_for_model(image_bytes, description)
+        img = pil_image.resize((224, 224))
+        img_array = keras_image.img_to_array(img)
+        img_preprocessed = (np.expand_dims(img_array, axis=0) / 127.5) - 1.0
 
-        # Get model predictions (probabilities)
-        probs = keras_model.predict(features)[0]
-        pred_idx = np.argmax(probs)
+        if not description or not description.strip():
+            description = "ตรวจสอบสภาพใบข้าว"
 
-        # Convert predicted index back to original string label
-        label_input_for_inverse = (
-            [pred_idx] if np.isscalar(pred_idx) else pred_idx.flatten()
-        )
-        label = label_encoder.inverse_transform(label_input_for_inverse)[0]
+        with torch.no_grad():
+            inputs = bge_tokenizer(description, return_tensors="pt", truncation=True,
+                                   padding=True, max_length=512).to(DEVICE)
+            outputs = bge_model(**inputs)
+            text_embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
 
-        confidence = probs[pred_idx] * 100
+        return {
+            "image_input": img_preprocessed.astype(np.float32),
+            "text_input":  text_embedding.astype(np.float32),
+        }
 
-        # Retrieve remedy and treatment information
-        remedy = remedy_treatment_dict.get(label, {}).get(
-            "remedy", "ข้อมูลการรักษาไม่พร้อมใช้งาน"
-        )
-        treatment = remedy_treatment_dict.get(label, {}).get(
-            "treatment", "ข้อมูลการรักษาไม่พร้อมใช้งาน"
-        )
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=f"Preprocessing error: {e}")
 
-        # Prepare class probabilities for the API response
-        class_probabilities = {}
-        if hasattr(label_encoder, "classes_"):
-            for i, class_name_original in enumerate(label_encoder.classes_):
-                class_probabilities[class_name_original] = f"{probs[i]*100:.2f}%"
-        else:
-            class_probabilities = {
-                "error": "Class names not available from label encoder."
+@app.post("/predict/")
+def predict_endpoint(image: UploadFile = File(...), description: str = Form(...)):
+    if not all([keras_model, label_encoder]):
+        raise HTTPException(status_code=503, detail="Core models not ready.")
+
+    try:
+        image_bytes = image.file.read()
+        pil_image   = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+        clip_result = check_rice_leaf_with_clip(pil_image)
+        if not clip_result["is_rice_leaf"]:
+            return {
+                "prediction": "not_rice",
+                "confidence": f"{clip_result['confidence'] * 100:.2f}%",
+                "clip_check": {
+                    "passed": False,
+                    "rice_leaf_confidence": f"{clip_result['confidence'] * 100:.2f}%",
+                    "matched_label": clip_result["matched_label"],
+                    "all_scores": clip_result["all_scores"],
+                    "threshold": f"{CLIP_THRESHOLD * 100:.0f}%",
+                    "message": "กรุณาส่งรูปใบข้าวเพื่อวิเคราะห์โรค",
+                },
+                "class_probabilities": None,
+            }
+
+        inputs_dict = preprocess_input_for_model(pil_image, description)
+        
+        preds = keras_model.predict(inputs_dict)
+        p_main = preds[0][0]
+        p_img  = preds[1][0]
+        p_txt  = preds[2][0]
+
+        w_sum = ENSEMBLE_W_MAIN + ENSEMBLE_W_IMG + ENSEMBLE_W_TXT
+        w_main = ENSEMBLE_W_MAIN / w_sum
+        w_img  = ENSEMBLE_W_IMG / w_sum
+        w_txt  = ENSEMBLE_W_TXT / w_sum
+
+        ens_probs = (w_main * p_main) + (w_img * p_img) + (w_txt * p_txt)
+
+        pred_idx   = int(np.argmax(ens_probs))
+        label      = label_encoder.inverse_transform([pred_idx])[0]
+        confidence = float(ens_probs[pred_idx] * 100)
+
+        class_probabilities = {
+            cls: f"{ens_probs[i] * 100:.2f}%"
+            for i, cls in enumerate(label_encoder.classes_)
+        }
+
+        prediction_key = PREDICTION_MAP.get(label, label)
+
+        if confidence < DISEASE_CONFIDENCE_THRESHOLD * 100:
+            return {
+                "prediction": "not_clear",
+                "confidence": f"{confidence:.2f}%",
+                "clip_check": {
+                    "passed": True,
+                    "rice_leaf_confidence": f"{clip_result['confidence'] * 100:.2f}%",
+                    "matched_label": clip_result["matched_label"],
+                },
+                "class_probabilities": class_probabilities,
             }
 
         return {
-            "prediction": label,
+            "prediction": prediction_key,
             "confidence": f"{confidence:.2f}%",
-            "remedy": remedy,
-            "treatment": treatment,
+            "clip_check": {
+                "passed": True,
+                "rice_leaf_confidence": f"{clip_result['confidence'] * 100:.2f}%",
+                "matched_label": clip_result["matched_label"],
+            },
             "class_probabilities": class_probabilities,
         }
-    except HTTPException as e_http:
-        raise e_http
-    except Exception as e_predict:
-        print(f"[ERROR] During prediction processing: {e_predict}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed due to an internal error: {e_predict}",
-        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
 
-
-# API endpoint for health check
 @app.get("/health")
 async def health_check():
-    # Check if all critical components are loaded
-    models_loaded_flags = {
-        "Keras_Model": keras_model is not None,
-        "Label_Encoder": label_encoder is not None,
-        "Scaler": scaler is not None,
-        "Text_Tokenizer": text_tokenizer is not None,
-        "Text_Embedder": text_model_embedder is not None,
-        "Image_Extractor": mobilenet_extractor is not None,
+    models_ready = all([keras_model, label_encoder, bge_model])
+    clip_ready   = all([clip_model, clip_processor])
+    return {
+        "status": "healthy" if (models_ready and clip_ready) else "unhealthy",
+        "model": KERAS_MODEL_NAME,
+        "text_encoder": "BGE-M3",
+        "models_loaded": models_ready,
+        "clip_gatekeeper_loaded": clip_ready,
     }
-    if all(models_loaded_flags.values()):
-        return {
-            "status": "healthy",
-            "message": "All models and preprocessors loaded successfully.",
-        }
-    else:
-        missing_components = [
-            name for name, loaded in models_loaded_flags.items() if not loaded
-        ]
-        return {
-            "status": "unhealthy",
-            "message": f"One or more components failed to load: {', '.join(missing_components)}. Check server logs.",
-        }
