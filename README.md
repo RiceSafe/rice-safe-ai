@@ -1,35 +1,53 @@
-# RiceSafe Multimodal AI Model
+# RiceSafe Multimodal AI Model for Disease Classification
 
-## Sample Dataset
+This project implements a multimodal model to classify common rice plant diseases using both image and textual symptom data. It leverages MLflow for experiment tracking and includes a FastAPI application for model serving.
 
-This project uses a curated dataset that combines both image and text data to classify five types of rice diseases.
+## Table of Contents
+- [Features](#features)
+- [Dataset](#dataset)
+  - [Image Data](#image-data)
+  - [Text Data](#text-data)
+  - [Classes](#classes)
+  - [Dataset References](#dataset-references)
+- [Installation & Setup (AI Service)](#installation--setup-ai-service)
+  - [1. Create Virtual Environment](#1-create-virtual-environment)
+  - [2. Activate Virtual Environment](#2-activate-virtual-environment)
+  - [3. Install Dependencies](#3-install-dependencies)
+  - [4. Run the API](#4-run-the-api)
 
-### Sample Image Data
-- **Total samples**: 1,250 images  
-- **Classes**: 250 images per class across 5 disease types
-- **Source**:
-  - [Rice Leaf Diseases (Kaggle)](https://www.kaggle.com/datasets/trumanrase/rice-leaf-diseases)
-  - [Rice Leaf Disease Dataset (Mendeley Data)](https://data.mendeley.com/datasets/dwtn3c6w6p/1)
-- Only a subset of images was selected from these datasets
+## Features
 
+- **Multimodal Learning:** Combines image features (from MobileNetV2) and text embeddings (from BAAI/bge-m3) for classification.
+- **Deep Learning Model:** Uses a Keras Sequential model with Dense, Batch Normalization, and Dropout layers.
+- **Experiment Tracking:** Integrated with MLflow to log parameters, metrics, artifacts (models, plots, data), and source code for each training run.
+- **Robust Training:** Implements callbacks like EarlyStopping, ReduceLROnPlateau, and ModelCheckpoint.
+- **API for Serving:** Includes a FastAPI application to serve the trained model for predictions.
+- **Thai Language Support:** Handles Thai class names and provides Thai font support for visualizations.
 
-### Sample Text Data
-- **Total samples**: 1,250 symptom descriptions
-- **Creation**:
-  - 100 manually written symptom descriptions per class
-  - 150 additional samples per class generated through oversampling techniques
-- Each sample is labeled to match one of the five classes.
+## Dataset
+
+This project utilizes a curated dataset combining image and text data to classify **three common rice plant diseases plus other mixed classes in a single class ( Other )**, totaling five distinct classes.
+
+_Please note: The dataset details below describe the initial setup used for this proof-of-concept (POC). The dataset is expected to evolve and be refined in future development._
+
+### Image Data
+
+## TBA
+
+### Text Data
+
+## TBA
 
 ### Classes
+
 1. Bacterial Leaf Blight (โรคขอบใบแห้ง)
 2. Brown Spot (โรคใบจุดสีน้ำตาล)
-3. Bacterial Leaf Streak (โรคใบขีดโปร่งแสง)
-4. Blast (โรคไหม้)
-5. Healthy (ปกติ)
+3. Blast (โรคไหม้)
+4. Other (อื่นๆ = ปกติ + โรคใบขีดสีน้ำตาล + โรคใบสีส้ม + โรคกาบใบแห้ง + แมลงหนามตำข้าว)
 
 ### Dataset References
-- Truman Rase. *Rice Leaf Diseases*. Kaggle. https://www.kaggle.com/datasets/trumanrase/rice-leaf-diseases  
-- Lourdu Antony, Leo Prasanth (2023). Rice Leaf Diseases Dataset, Mendeley Data, V1. https://doi.org/10.17632/dwtn3c6w6p.1
+
+## TBA
 
 ## Installation & Setup (AI Service)
 
