@@ -1,3 +1,12 @@
+---
+title: Rice Safe AI
+emoji: 🌾
+colorFrom: green
+colorTo: yellow
+sdk: docker
+pinned: false
+---
+
 # RiceSafe Multimodal AI Model for Disease Classification
 
 This project implements a multimodal model to classify common rice plant diseases using both image and textual symptom data. It leverages MLflow for experiment tracking and includes a FastAPI application for model serving.
