@@ -7,84 +7,85 @@ sdk: docker
 pinned: false
 ---
 
-# RiceSafe Multimodal AI Model for Disease Classification
+# RiceSafe AI
 
-This project implements a multimodal model to classify common rice plant diseases using both image and textual symptom data. It leverages MLflow for experiment tracking and includes a FastAPI application for model serving.
+Multimodal rice leaf disease classification: images plus Thai symptom text. Training is driven by `training_pipeline_V3.py` (MobileNetV2, BGE-M3, three softmax heads). Inference is served by `api.py` (FastAPI) with a CLIP pre-check before the Keras model.
 
-## Table of Contents
-- [Features](#features)
-- [Dataset](#dataset)
-  - [Image Data](#image-data)
-  - [Text Data](#text-data)
-  - [Classes](#classes)
-  - [Dataset References](#dataset-references)
-- [Installation & Setup (AI Service)](#installation--setup-ai-service)
-  - [1. Create Virtual Environment](#1-create-virtual-environment)
-  - [2. Activate Virtual Environment](#2-activate-virtual-environment)
-  - [3. Install Dependencies](#3-install-dependencies)
-  - [4. Run the API](#4-run-the-api)
+## Layout
 
-## Features
+| Path | Purpose |
+|------|---------|
+| `training_pipeline_V3.py` | V3 pipeline: `--mode` `pipeline` \| `extract` \| `train` \| `eval`. Writes model, label encoder, `features_v3_exp009_other_text/`, `reports/`, `graphs/` (paths set at top of file). |
+| `api.py` | `POST /predict/`, `GET /health`. Default weights: `RiceSafeModel.keras`, `label_encoderV3.pkl` (see constants in file). |
+| `training_pipeline_V2.py` | Older pipeline; expects `data_physical/`. |
+| `train_ricesafe_multimodal.py` | Older MLflow run; expects `data/`. |
+| `tests/` | Pytest; sample CSV under `tests/data/dummy/`. |
+| `Dockerfile` | `uvicorn api:app` on port 7860. |
+| `.env.api.example` | Template for `.env.api` (thresholds). |
 
-- **Multimodal Learning:** Combines image features (from MobileNetV2) and text embeddings (from BAAI/bge-m3) for classification.
-- **Deep Learning Model:** Uses a Keras Sequential model with Dense, Batch Normalization, and Dropout layers.
-- **Experiment Tracking:** Integrated with MLflow to log parameters, metrics, artifacts (models, plots, data), and source code for each training run.
-- **Robust Training:** Implements callbacks like EarlyStopping, ReduceLROnPlateau, and ModelCheckpoint.
-- **API for Serving:** Includes a FastAPI application to serve the trained model for predictions.
-- **Thai Language Support:** Handles Thai class names and provides Thai font support for visualizations.
+# Current Classes
+- Bacterial Leaf Blight (โรคขอบใบแห้ง)
+- Brown Spot (โรคใบจุดสีน้ำตาล)
+- Blast (โรคไหม้)
+- Other (อื่นๆ = ปกติ + โรคใบขีดสีน้ำตาล + โรคใบสีส้ม + โรคกาบใบแห้ง + แมลงหนามตำข้าว)x
 
-## Dataset
 
-This project utilizes a curated dataset combining image and text data to classify **three common rice plant diseases plus other mixed classes in a single class ( Other )**, totaling five distinct classes.
+## Pipeline V3 flow
 
-_Please note: The dataset details below describe the initial setup used for this proof-of-concept (POC). The dataset is expected to evolve and be refined in future development._
+1. **Extract** — For each split (`train` / `val` / `test_clean` / `test_noisy`), load images under `data_physical_v8_final`, pair each image with symptom text (class CSV or `other_csv` routing), run **BAAI/bge-m3**, save `*_text_feats.npy`, `*_labels.npy`, `*_img_paths.npy` into `features_v3_exp009_other_text/`.
+2. **Train** — `tf.data` loads image files plus those arrays; training applies modality dropout and augments images. unfreeze MobileNetV2, lower LR. Best weights go to the `.keras` file and `LabelEncoder` to `.pkl` (paths in script).
+3. **Eval** — Load the saved model and feature files; run the built-in scenario set (clean / noisy text / image-only / degraded image variants), print metrics, write `reports/` and `graphs/`.
 
-### Image Data
+`--mode pipeline` runs extract, then train, then eval; other modes run a single stage.
 
-## TBA
+## Training (V3)
 
-### Text Data
-
-## TBA
-
-### Classes
-
-1. Bacterial Leaf Blight (โรคขอบใบแห้ง)
-2. Brown Spot (โรคใบจุดสีน้ำตาล)
-3. Blast (โรคไหม้)
-4. Other (อื่นๆ = ปกติ + โรคใบขีดสีน้ำตาล + โรคใบสีส้ม + โรคกาบใบแห้ง + แมลงหนามตำข้าว)
-
-### Dataset References
-
-## TBA
-
-## Installation & Setup (AI Service)
-
-### 1. Create Virtual Environment
 ```bash
-python -m venv venv
+# All in one
+python training_pipeline_V3.py --mode pipeline
+
+# Separate 
+python training_pipeline_V3.py --mode extract 
+python training_pipeline_V3.py --mode train  
+python training_pipeline_V3.py --mode eval  
 ```
 
-### 2. Activate Virtual Environment
-- **Windows:** `.\venv\Scripts\activate`
-- **Mac/Linux:** `source venv/bin/activate`
+## API
 
-### 3. Install Dependencies
-Due to PyTorch hardware specifics, it is recommended to install PyTorch based on your OS first to avoid CVE-2025-32434 issues with `transformers` loading CLIP models.
+```bash
+uvicorn api:app --reload --host 0.0.0.0 --port 8080
+```
 
-**For Windows (with NVIDIA GPU / CUDA 11.8):**
+## Tests
+
+```bash
+pytest tests/
+```
+
+## Install
+
+```bash
+python -m venv venv
+# Windows: .\venv\Scripts\activate
+# macOS/Linux: source venv/bin/activate
+```
+
+Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+- CUDA (Windows, NVIDIA):
+
 ```bash
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
-**For Mac/Linux (CPU or Apple Silicon):**
+- CPU / Apple Silicon:
+
 ```bash
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
 pip install -r requirements.txt
-```
-
-### 4. Run the API
-```bash
-uvicorn api_exp009_other:app --reload --port 8080
 ```
