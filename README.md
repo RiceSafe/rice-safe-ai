@@ -7,6 +7,8 @@ sdk: docker
 pinned: false
 ---
 
+![CI/CD Pipeline](https://github.com/RiceSafe/rice-safe-ai/actions/workflows/pipeline.yml/badge.svg)
+
 # RiceSafe AI
 
 Multimodal rice leaf disease classification: images plus Thai symptom text. Training is driven by `training_pipeline_V3.py` (MobileNetV2, BGE-M3, three softmax heads). Inference is served by `api.py` (FastAPI) with a CLIP pre-check before the Keras model.
@@ -89,3 +91,11 @@ pip install -r requirements.txt
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
 pip install -r requirements.txt
 ```
+
+## CI/CD & Automation
+
+This repository uses **GitHub Actions** to automate the testing and deployment lifecycle:
+
+- **Continuous Integration (CI):** Every push or Pull Request triggers an automated test suite using `pytest` to ensure model and API integrity.
+- **Continuous Deployment (CD):** Upon a successful merge to the `main` branch, the repository is automatically synchronized with the production environment.
+- **Live Space:** [huggingface.co/spaces/xNatthapol/rice-safe-ai](https://huggingface.co/spaces/xNatthapol/rice-safe-ai)
