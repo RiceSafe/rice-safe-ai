@@ -7,9 +7,9 @@ sdk: docker
 pinned: false
 ---
 
-![CI/CD Pipeline](https://github.com/RiceSafe/rice-safe-ai/actions/workflows/pipeline.yml/badge.svg)
-
 # RiceSafe AI
+
+![CI/CD Pipeline](https://github.com/RiceSafe/rice-safe-ai/actions/workflows/pipeline.yml/badge.svg)
 
 Multimodal rice leaf disease classification: images plus Thai symptom text. Training is driven by `training_pipeline_V3.py` (MobileNetV2, BGE-M3, three softmax heads). Inference is served by `api.py` (FastAPI) with a CLIP pre-check before the Keras model.
 
